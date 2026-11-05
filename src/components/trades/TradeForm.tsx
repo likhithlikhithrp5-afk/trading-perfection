@@ -1,97 +1,64 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { Trade } from '@/types';
-import { calculateGrossPnL, calculateNetPnL } from '@/services/calculations';
-import { formatCurrency } from '@/utils/format';
+import type { Trade } from '@/types';
 
 const tradeSchema = z.object({
   symbol: z.string().min(1, 'Symbol is required'),
-  quantity: z.number().positive('Quantity must be positive'),
-  entry_price: z.number().positive('Entry price must be positive'),
-  exit_price: z.number().positive('Exit price must be positive'),
   order_type: z.enum(['BUY', 'SELL']),
-  brokerage: z.number().min(0, 'Brokerage cannot be negative'),
-  government_charges: z.number().min(0, 'Government charges cannot be negative'),
-  other_charges: z.number().min(0, 'Other charges cannot be negative'),
-  trade_time: z.string().optional(),
-  strategy_id: z.string().optional(),
-  notes: z.string().optional(),
+  result: z.enum(['positive', 'negative']),
+  risk_reward: z.string()
+    .regex(/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/, 'Enter a risk-to-reward ratio such as 1:2')
+    .refine((value) => value.split(':').every((part) => Number(part) > 0), 'Both ratio values must be greater than zero'),
 });
 
 type TradeFormData = z.infer<typeof tradeSchema>;
 
-interface TradePreview {
-  grossPnL: number;
-  netPnL: number;
-  totalCharges: number;
-  returnPercent: number;
-}
-
 interface TradeFormProps {
-  onSubmit: (trade: Omit<Trade, 'id' | 'user_id' | 'trade_date' | 'created_at' | 'updated_at' | 'gross_pnl' | 'net_pnl'>) => void;
+  onSubmit: (
+    trade: Omit<Trade, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'gross_pnl' | 'net_pnl'>,
+    image?: File
+  ) => void | Promise<void>;
   isLoading?: boolean;
   initialData?: Partial<Trade>;
+  trade_date?: string;
 }
 
-export default function TradeForm({ onSubmit, isLoading = false, initialData }: TradeFormProps) {
-  const [preview, setPreview] = useState<TradePreview | null>(null);
+export default function TradeForm({ onSubmit, isLoading = false, initialData, trade_date }: TradeFormProps) {
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string>();
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
-  const { register, handleSubmit, watch, formState: { errors } } = useForm<TradeFormData>({
+  const { register, handleSubmit, formState: { errors } } = useForm<TradeFormData>({
     resolver: zodResolver(tradeSchema),
-    defaultValues: initialData as Partial<TradeFormData>,
+    defaultValues: {
+      symbol: initialData?.symbol ?? '',
+      order_type: initialData?.order_type ?? 'BUY',
+      result: initialData?.result,
+      risk_reward: initialData?.risk_reward ?? '',
+    },
   });
 
-  const formValues = watch();
+  useEffect(() => () => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+  }, [photoPreview]);
 
-  useEffect(() => {
-    if (formValues.quantity && formValues.entry_price && formValues.exit_price) {
-      const mockTrade: Trade = {
-        id: 'preview',
-        user_id: '',
-        trade_date: new Date().toISOString().split('T')[0],
-        symbol: formValues.symbol,
-        quantity: formValues.quantity,
-        entry_price: formValues.entry_price,
-        exit_price: formValues.exit_price,
-        order_type: formValues.order_type,
-        brokerage: formValues.brokerage || 0,
-        government_charges: formValues.government_charges || 0,
-        other_charges: formValues.other_charges || 0,
-        gross_pnl: 0,
-        net_pnl: 0,
-      };
-
-      const grossPnL = calculateGrossPnL(mockTrade);
-      const netPnL = calculateNetPnL({ ...mockTrade, gross_pnl: grossPnL });
-      const totalCharges = (formValues.brokerage || 0) + (formValues.government_charges || 0) + (formValues.other_charges || 0);
-
-      setPreview({
-        grossPnL,
-        netPnL,
-        totalCharges,
-        returnPercent: grossPnL > 0 ? ((netPnL / Math.abs(formValues.entry_price * formValues.quantity)) * 100) : 0,
-      });
-    }
-  }, [formValues]);
-
-  const handleFormSubmit = (data: TradeFormData) => {
-    onSubmit({
+  const handleFormSubmit = async (data: TradeFormData) => {
+    const tradeSubmission = {
       symbol: data.symbol,
-      quantity: data.quantity,
-      entry_price: data.entry_price,
-      exit_price: data.exit_price,
       order_type: data.order_type,
-      brokerage: data.brokerage,
-      government_charges: data.government_charges,
-      other_charges: data.other_charges,
-      trade_time: data.trade_time,
-      strategy_id: data.strategy_id,
-      notes: data.notes,
-      instrument: 'OPTION',
-      exchange: 'NSE',
-    });
+      result: data.result,
+      risk_reward: data.risk_reward,
+      quantity: 0,
+      entry_price: 0,
+      exit_price: 0,
+      brokerage: 0,
+      government_charges: 0,
+      other_charges: 0,
+      trade_date: trade_date || new Date().toISOString().split('T')[0],
+    };
+    await onSubmit(tradeSubmission, selectedImage ?? undefined);
   };
 
   return (
@@ -121,123 +88,66 @@ export default function TradeForm({ onSubmit, isLoading = false, initialData }: 
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Quantity *</label>
-          <input
-            {...register('quantity', { valueAsNumber: true })}
-            type="number"
-            step="1"
-            placeholder="e.g., 50"
+          <label className="block text-sm font-medium mb-1">Result *</label>
+          <select
+            {...register('result')}
             className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-profit"
-          />
-          {errors.quantity && <p className="text-loss text-xs mt-1">{errors.quantity.message}</p>}
+          >
+            <option value="">Select a result</option>
+            <option value="positive">Positive</option>
+            <option value="negative">Negative</option>
+          </select>
+          {errors.result && <p className="text-loss text-xs mt-1">{errors.result.message}</p>}
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Entry Price *</label>
+          <label className="block text-sm font-medium mb-1">Risk : Reward *</label>
           <input
-            {...register('entry_price', { valueAsNumber: true })}
-            type="number"
-            step="0.05"
-            placeholder="e.g., 100.50"
+            {...register('risk_reward')}
+            type="text"
+            placeholder="e.g., 1:2"
             className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-profit"
           />
-          {errors.entry_price && <p className="text-loss text-xs mt-1">{errors.entry_price.message}</p>}
+          {errors.risk_reward && <p className="text-loss text-xs mt-1">{errors.risk_reward.message}</p>}
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Exit Price *</label>
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium mb-1" htmlFor="trade-photo">Photo from gallery</label>
           <input
-            {...register('exit_price', { valueAsNumber: true })}
-            type="number"
-            step="0.05"
-            placeholder="e.g., 110.50"
+            ref={photoInputRef}
+            id="trade-photo"
+            type="file"
+            accept="image/*"
+            onChange={(event) => {
+              const image = event.target.files?.[0] ?? null;
+              setSelectedImage(image);
+              setPhotoPreview(image ? URL.createObjectURL(image) : undefined);
+            }}
             className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-profit"
           />
-          {errors.exit_price && <p className="text-loss text-xs mt-1">{errors.exit_price.message}</p>}
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Trade Time</label>
-          <input
-            {...register('trade_time')}
-            type="time"
-            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-profit"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Brokerage</label>
-          <input
-            {...register('brokerage', { valueAsNumber: true })}
-            type="number"
-            step="0.01"
-            placeholder="0.00"
-            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-profit"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Government Charges</label>
-          <input
-            {...register('government_charges', { valueAsNumber: true })}
-            type="number"
-            step="0.01"
-            placeholder="0.00"
-            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-profit"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Other Charges</label>
-          <input
-            {...register('other_charges', { valueAsNumber: true })}
-            type="number"
-            step="0.01"
-            placeholder="0.00"
-            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-profit"
-          />
+          {selectedImage && (
+            <div className="mt-3 flex items-center gap-3">
+              {photoPreview && <img src={photoPreview} alt="Selected trade" className="h-16 w-16 rounded-lg object-cover" />}
+              <span className="truncate text-sm text-slate-600 dark:text-slate-300">{selectedImage.name}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedImage(null);
+                  setPhotoPreview(undefined);
+                  if (photoInputRef.current) photoInputRef.current.value = '';
+                }}
+                className="text-sm font-medium text-loss hover:underline"
+              >
+                Remove
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      <div>
-        <label className="block text-sm font-medium mb-1">Notes</label>
-        <textarea
-          {...register('notes')}
-          placeholder="Add trade notes..."
-          rows={3}
-          className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-profit"
-        />
-      </div>
-
-      {preview && (
-        <div className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg space-y-2">
-          <h4 className="font-medium">Trade Preview</h4>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-            <div>
-              <p className="text-slate-600 dark:text-slate-400 text-xs">Gross P&L</p>
-              <p className={`font-medium ${preview.grossPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
-                {formatCurrency(preview.grossPnL)}
-              </p>
-            </div>
-            <div>
-              <p className="text-slate-600 dark:text-slate-400 text-xs">Total Charges</p>
-              <p className="font-medium">{formatCurrency(preview.totalCharges)}</p>
-            </div>
-            <div>
-              <p className="text-slate-600 dark:text-slate-400 text-xs">Net P&L</p>
-              <p className={`font-medium ${preview.netPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
-                {formatCurrency(preview.netPnL)}
-              </p>
-            </div>
-            <div>
-              <p className="text-slate-600 dark:text-slate-400 text-xs">Return %</p>
-              <p className={`font-medium ${preview.returnPercent >= 0 ? 'text-profit' : 'text-loss'}`}>
-                {preview.returnPercent.toFixed(2)}%
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Monetary P&amp;L is not recorded for these simplified journal entries.
+      </p>
 
       <button
         type="submit"

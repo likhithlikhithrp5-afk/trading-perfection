@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/lib/store';
 import { signOut } from '@/services/supabase/auth';
-import { Menu, X, LogOut, Settings, User, Sun, Moon } from 'lucide-react';
+import { Menu, X, LogOut } from 'lucide-react';
 
 export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { user, setUser, darkMode, toggleDarkMode } = useAppStore();
+  const { user, setUser } = useAppStore();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -23,7 +23,6 @@ export default function Header() {
     { label: "Trader's Diary", path: '/diary' },
     { label: 'Analytics', path: '/analytics' },
     { label: 'Portfolio', path: '/portfolio' },
-    { label: 'AI Assistant', path: '/ai' },
   ];
 
   const isActive = (path: string) => {
@@ -63,26 +62,11 @@ export default function Header() {
 
           {/* Right Actions */}
           <div className="flex items-center space-x-3">
-            {/* Dark Mode Toggle */}
-            <button
-              onClick={toggleDarkMode}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              title="Toggle dark mode"
-            >
-              {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-
             {/* Desktop User Menu */}
             <div className="hidden md:flex items-center space-x-2">
               <span className="text-sm text-slate-600 dark:text-slate-400 truncate max-w-[200px]">
                 {user?.full_name || user?.email}
               </span>
-              <Link to="/settings" className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
-                <Settings size={20} />
-              </Link>
-              <Link to="/profile" className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
-                <User size={20} />
-              </Link>
               <button
                 onClick={handleLogout}
                 className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 text-loss rounded-lg transition-colors"
@@ -119,20 +103,6 @@ export default function Header() {
               </Link>
             ))}
             <hr className="dark:border-slate-800 my-2" />
-            <Link
-              to="/settings"
-              onClick={() => setMobileMenuOpen(false)}
-              className="block px-4 py-2 rounded-lg text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900"
-            >
-              Settings
-            </Link>
-            <Link
-              to="/profile"
-              onClick={() => setMobileMenuOpen(false)}
-              className="block px-4 py-2 rounded-lg text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900"
-            >
-              Profile
-            </Link>
             <button
               onClick={() => {
                 handleLogout();

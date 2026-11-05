@@ -7,33 +7,40 @@ import { calculateDailyPerformance, calculateNetPnL, calculateGrossPnL } from '@
  */
 export async function createTrade(userId: string, trade: Omit<Trade, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'gross_pnl' | 'net_pnl'>): Promise<{ success: boolean; data?: Trade; error?: string }> {
   if (!isSupabaseConfigured) {
+    console.warn('⚠️ Supabase not configured. Using demo mode for trade creation.');
     return { success: true, data: { ...trade, id: crypto.randomUUID(), user_id: userId, gross_pnl: calculateGrossPnL({ ...trade, id: crypto.randomUUID(), user_id: userId, gross_pnl: 0, net_pnl: 0 } as Trade), net_pnl: calculateNetPnL({ ...trade, id: crypto.randomUUID(), user_id: userId, gross_pnl: 0, net_pnl: 0 } as Trade) } as Trade };
   }
 
   try {
+    console.log('📝 Creating trade for user:', userId);
     const grossPnL = calculateGrossPnL(trade as Trade);
     const netPnL = calculateNetPnL({ ...trade, gross_pnl: grossPnL } as Trade);
 
+    const insertPayload = {
+      ...trade,
+      user_id: userId,
+      gross_pnl: grossPnL,
+      net_pnl: netPnL,
+    };
+
+    console.log('📤 Supabase insert payload:', insertPayload);
+
     const { data, error } = await supabase!
       .from(TABLES.TRADES)
-      .insert([
-        {
-          ...trade,
-          user_id: userId,
-          gross_pnl: grossPnL,
-          net_pnl: netPnL,
-        },
-      ])
+      .insert([insertPayload])
       .select()
       .single();
 
     if (error) {
-      return { success: false, error: error.message };
+      console.error('❌ Supabase insert error:', error.message, error.code, error.details);
+      return { success: false, error: `Database error: ${error.message}` };
     }
 
+    console.log('✅ Trade created successfully:', data);
     return { success: true, data };
-  } catch {
-    return { success: false, error: 'Failed to create trade' };
+  } catch (err) {
+    console.error('❌ Unexpected error during trade creation:', err);
+    return { success: false, error: `Unexpected error: ${err instanceof Error ? err.message : 'Unknown error'}` };
   }
 }
 

@@ -12,11 +12,8 @@ import Portfolio from '@/pages/Portfolio';
 import Watchlist from '@/pages/Watchlist';
 import Orders from '@/pages/Orders';
 import Dividends from '@/pages/Dividends';
-import Settings from '@/pages/Settings';
-import Profile from '@/pages/Profile';
 import Login from '@/pages/Login';
 import Signup from '@/pages/Signup';
-import AIAssistant from '@/pages/AIAssistant';
 
 // Components
 import ProtectedRoute from '@/components/common/ProtectedRoute';
@@ -83,7 +80,6 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
-        <Route path="/ai" element={<AIAssistant />} />
         <Route
           path="/*"
           element={
@@ -100,8 +96,6 @@ function App() {
                     <Route path="/watchlist" element={<Watchlist />} />
                     <Route path="/orders" element={<Orders />} />
                     <Route path="/dividends" element={<Dividends />} />
-                    <Route path="/settings" element={<Settings />} />
-                    <Route path="/profile" element={<Profile />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </main>

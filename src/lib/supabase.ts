@@ -7,6 +7,10 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
 if (!isSupabaseConfigured) {
   console.warn('⚠️ VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY not set in environment. Demo mode is active.');
+  console.warn('   URL configured:', !!supabaseUrl);
+  console.warn('   ANON_KEY configured:', !!supabaseAnonKey);
+} else {
+  console.log('✅ Supabase configured successfully. Using production mode.');
 }
 
 export const supabase = isSupabaseConfigured ? createClient(supabaseUrl, supabaseAnonKey) : null;

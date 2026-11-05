@@ -16,6 +16,7 @@ export interface CapitalSettings {
 }
 
 export type OrderType = 'BUY' | 'SELL';
+export type TradeResult = 'positive' | 'negative';
 export type InstrumentType = 'STOCK' | 'OPTION' | 'FUTURE' | 'INDEX';
 export type ExchangeType = 'NSE' | 'BSE' | 'MCX' | 'NCDEX';
 
@@ -28,6 +29,8 @@ export interface Trade {
   instrument?: InstrumentType;
   exchange?: ExchangeType;
   order_type: OrderType;
+  result?: TradeResult;
+  risk_reward?: string;
   quantity: number;
   entry_price: number;
   exit_price: number;

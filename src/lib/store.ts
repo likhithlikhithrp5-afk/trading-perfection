@@ -22,18 +22,12 @@ interface AppStore {
   deleteTrade: (id: string) => void;
 
   // UI State
-  darkMode: boolean;
-  toggleDarkMode: () => void;
   selectedYear: number;
   setSelectedYear: (year: number) => void;
   selectedMonth: number;
   setSelectedMonth: (month: number) => void;
   selectedDate: string | null;
   setSelectedDate: (date: string | null) => void;
-
-  // AI Threshold
-  aiThreshold: number;
-  setAIThreshold: (threshold: number) => void;
 }
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -63,24 +57,10 @@ export const useAppStore = create<AppStore>((set) => ({
     })),
 
   // UI State
-  darkMode: localStorage.getItem('darkMode') === 'true' || false,
-  toggleDarkMode: () =>
-    set((state) => {
-      const newMode = !state.darkMode;
-      localStorage.setItem('darkMode', String(newMode));
-      return { darkMode: newMode };
-    }),
   selectedYear: new Date().getFullYear(),
   setSelectedYear: (year) => set({ selectedYear: year }),
   selectedMonth: new Date().getMonth(),
   setSelectedMonth: (month) => set({ selectedMonth: month }),
   selectedDate: null,
   setSelectedDate: (date) => set({ selectedDate: date }),
-
-  // AI Threshold
-  aiThreshold: parseInt(localStorage.getItem('aiThreshold') || '70'),
-  setAIThreshold: (threshold) => {
-    localStorage.setItem('aiThreshold', String(threshold));
-    set({ aiThreshold: threshold });
-  },
 }));

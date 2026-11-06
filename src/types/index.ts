@@ -29,7 +29,7 @@ export interface Trade {
   instrument?: InstrumentType;
   exchange?: ExchangeType;
   order_type: OrderType;
-  result?: TradeResult;
+  result?: TradeResult | null;
   risk_reward?: string;
   quantity: number;
   entry_price: number;
@@ -41,6 +41,7 @@ export interface Trade {
   net_pnl: number;
   order_type_detail?: string;
   strategy_id?: string;
+  strategy?: string;
   notes?: string;
   created_at?: string;
   updated_at?: string;

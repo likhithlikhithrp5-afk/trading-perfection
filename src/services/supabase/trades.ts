@@ -1,81 +1,72 @@
 import { supabase, TABLES, isSupabaseConfigured } from '@/lib/supabase';
-import { Trade, TradingDay } from '@/types';
+import type { Trade, TradingDay } from '@/types';
 import { calculateDailyPerformance, calculateNetPnL, calculateGrossPnL } from '@/services/calculations';
+import { normalizeSupabaseError, requireUserId } from '@/services/supabase/common';
 
-/**
- * Create a new trade
- */
-export async function createTrade(userId: string, trade: Omit<Trade, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'gross_pnl' | 'net_pnl'>): Promise<{ success: boolean; data?: Trade; error?: string }> {
-  if (!isSupabaseConfigured) {
-    console.warn('⚠️ Supabase not configured. Using demo mode for trade creation.');
-    return { success: true, data: { ...trade, id: crypto.randomUUID(), user_id: userId, gross_pnl: calculateGrossPnL({ ...trade, id: crypto.randomUUID(), user_id: userId, gross_pnl: 0, net_pnl: 0 } as Trade), net_pnl: calculateNetPnL({ ...trade, id: crypto.randomUUID(), user_id: userId, gross_pnl: 0, net_pnl: 0 } as Trade) } as Trade };
+type TradeInput = Omit<Trade, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'gross_pnl' | 'net_pnl'>;
+type TradeUpdates = Partial<TradeInput>;
+type TradeResult<T> = { success: boolean; data?: T; error?: string };
+
+function assertDatabaseReady(userId: string): string | undefined {
+  const userCheck = requireUserId(userId);
+  if (!userCheck.success) return userCheck.error;
+  if (!isSupabaseConfigured || !supabase) {
+    return 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY before saving journal data.';
   }
+  return undefined;
+}
+
+function calculateTradePnl(trade: TradeInput | Trade): Pick<Trade, 'gross_pnl' | 'net_pnl'> & { result: Trade['result'] } {
+  const gross_pnl = calculateGrossPnL(trade as Trade);
+  const net_pnl = calculateNetPnL({ ...trade, gross_pnl } as Trade);
+  return {
+    gross_pnl,
+    net_pnl,
+    result: net_pnl > 0 ? 'positive' : net_pnl < 0 ? 'negative' : null,
+  };
+}
+
+export async function createTrade(userId: string, trade: TradeInput): Promise<TradeResult<Trade>> {
+  const unavailable = assertDatabaseReady(userId);
+  if (unavailable) return { success: false, error: unavailable };
 
   try {
-    console.log('📝 Creating trade for user:', userId);
-    const grossPnL = calculateGrossPnL(trade as Trade);
-    const netPnL = calculateNetPnL({ ...trade, gross_pnl: grossPnL } as Trade);
-
-    const insertPayload = {
-      ...trade,
-      user_id: userId,
-      gross_pnl: grossPnL,
-      net_pnl: netPnL,
-    };
-
-    console.log('📤 Supabase insert payload:', insertPayload);
-
+    const pnl = calculateTradePnl(trade);
     const { data, error } = await supabase!
       .from(TABLES.TRADES)
-      .insert([insertPayload])
+      .insert({ ...trade, ...pnl, user_id: userId })
       .select()
       .single();
 
-    if (error) {
-      console.error('❌ Supabase insert error:', error.message, error.code, error.details);
-      return { success: false, error: `Database error: ${error.message}` };
-    }
-
-    console.log('✅ Trade created successfully:', data);
-    return { success: true, data };
-  } catch (err) {
-    console.error('❌ Unexpected error during trade creation:', err);
-    return { success: false, error: `Unexpected error: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    if (error) return { success: false, error: normalizeSupabaseError(error, 'Failed to save trade') };
+    return { success: true, data: data as Trade };
+  } catch (error) {
+    return { success: false, error: normalizeSupabaseError(error, 'Failed to save trade') };
   }
 }
 
-/**
- * Get all trades for a user
- */
-export async function getTrades(userId: string): Promise<{ success: boolean; data?: Trade[]; error?: string }> {
-  if (!isSupabaseConfigured) {
-    return { success: true, data: [] };
-  }
+export async function getTrades(userId: string): Promise<TradeResult<Trade[]>> {
+  const unavailable = assertDatabaseReady(userId);
+  if (unavailable) return { success: false, error: unavailable };
 
   try {
     const { data, error } = await supabase!
       .from(TABLES.TRADES)
       .select('*')
       .eq('user_id', userId)
-      .order('trade_date', { ascending: false });
+      .order('trade_date', { ascending: false })
+      .order('created_at', { ascending: false });
 
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true, data: data || [] };
-  } catch {
-    return { success: false, error: 'Failed to get trades' };
+    if (error) return { success: false, error: normalizeSupabaseError(error, 'Failed to load trades') };
+    return { success: true, data: (data || []) as Trade[] };
+  } catch (error) {
+    return { success: false, error: normalizeSupabaseError(error, 'Failed to load trades') };
   }
 }
 
-/**
- * Get trades for a specific date
- */
-export async function getTradesForDate(userId: string, date: string): Promise<{ success: boolean; data?: Trade[]; error?: string }> {
-  if (!isSupabaseConfigured) {
-    return { success: true, data: [] };
-  }
+export async function getTradesForDate(userId: string, date: string): Promise<TradeResult<Trade[]>> {
+  const unavailable = assertDatabaseReady(userId);
+  if (unavailable) return { success: false, error: unavailable };
 
   try {
     const { data, error } = await supabase!
@@ -85,157 +76,105 @@ export async function getTradesForDate(userId: string, date: string): Promise<{ 
       .eq('trade_date', date)
       .order('trade_time', { ascending: true });
 
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true, data: data || [] };
-  } catch {
-    return { success: false, error: 'Failed to get trades for date' };
+    if (error) return { success: false, error: normalizeSupabaseError(error, 'Failed to load trades for date') };
+    return { success: true, data: (data || []) as Trade[] };
+  } catch (error) {
+    return { success: false, error: normalizeSupabaseError(error, 'Failed to load trades for date') };
   }
 }
 
-/**
- * Update a trade
- */
-export async function updateTrade(userId: string, tradeId: string, updates: Partial<Trade>): Promise<{ success: boolean; data?: Trade; error?: string }> {
-  if (!isSupabaseConfigured) {
-    return { success: true, data: { ...(updates as Trade), id: tradeId, user_id: userId } };
-  }
+export async function updateTrade(userId: string, tradeId: string, updates: TradeUpdates): Promise<TradeResult<Trade>> {
+  const unavailable = assertDatabaseReady(userId);
+  if (unavailable) return { success: false, error: unavailable };
 
   try {
-    let grossPnL = updates.gross_pnl;
-    let netPnL = updates.net_pnl;
+    const { data: existing, error: lookupError } = await supabase!
+      .from(TABLES.TRADES)
+      .select('*')
+      .eq('id', tradeId)
+      .eq('user_id', userId)
+      .single();
 
-    if (updates.entry_price !== undefined || updates.exit_price !== undefined || updates.order_type !== undefined || updates.quantity !== undefined) {
-      const { data: existingTrade } = await supabase!
-        .from(TABLES.TRADES)
-        .select('*')
-        .eq('id', tradeId)
-        .eq('user_id', userId)
-        .single();
+    if (lookupError) return { success: false, error: normalizeSupabaseError(lookupError, 'Could not find this trade') };
 
-      if (existingTrade) {
-        const merged = { ...existingTrade, ...updates } as Trade;
-        grossPnL = calculateGrossPnL(merged);
-        netPnL = calculateNetPnL(merged);
-      }
-    }
-
+    const merged = { ...existing, ...updates } as Trade;
+    const pnl = calculateTradePnl(merged);
     const { data, error } = await supabase!
       .from(TABLES.TRADES)
-      .update({
-        ...updates,
-        gross_pnl: grossPnL,
-        net_pnl: netPnL,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ ...updates, ...pnl, updated_at: new Date().toISOString() })
       .eq('id', tradeId)
       .eq('user_id', userId)
       .select()
       .single();
 
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true, data };
-  } catch {
-    return { success: false, error: 'Failed to update trade' };
+    if (error) return { success: false, error: normalizeSupabaseError(error, 'Failed to update trade') };
+    return { success: true, data: data as Trade };
+  } catch (error) {
+    return { success: false, error: normalizeSupabaseError(error, 'Failed to update trade') };
   }
 }
 
-/**
- * Delete a trade
- */
-export async function deleteTrade(userId: string, tradeId: string): Promise<{ success: boolean; error?: string }> {
-  if (!isSupabaseConfigured) {
-    return { success: true };
-  }
+export async function deleteTrade(userId: string, tradeId: string): Promise<TradeResult<null>> {
+  const unavailable = assertDatabaseReady(userId);
+  if (unavailable) return { success: false, error: unavailable };
 
   try {
-    const { error } = await supabase!
+    const { data, error } = await supabase!
       .from(TABLES.TRADES)
       .delete()
       .eq('id', tradeId)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .select('id')
+      .single();
 
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true };
-  } catch {
-    return { success: false, error: 'Failed to delete trade' };
+    if (error) return { success: false, error: normalizeSupabaseError(error, 'Failed to delete trade') };
+    if (!data) return { success: false, error: 'Trade was not found or you do not have permission to delete it.' };
+    return { success: true, data: null };
+  } catch (error) {
+    return { success: false, error: normalizeSupabaseError(error, 'Failed to delete trade') };
   }
 }
 
-/**
- * Update or create trading day summary
- */
-export async function updateTradingDay(userId: string, date: string, trades: Trade[]): Promise<{ success: boolean; data?: TradingDay; error?: string }> {
-  if (!isSupabaseConfigured) {
-    return { success: true, data: { id: `demo-${date}`, user_id: userId, date, total_gross_pnl: trades.reduce((sum, t) => sum + Number(t.gross_pnl || 0), 0), total_brokerage: trades.reduce((sum, t) => sum + Number(t.brokerage || 0), 0), total_government_charges: trades.reduce((sum, t) => sum + Number(t.government_charges || 0), 0), total_other_charges: trades.reduce((sum, t) => sum + Number(t.other_charges || 0), 0), total_net_pnl: trades.reduce((sum, t) => sum + Number(t.net_pnl || 0), 0), trade_count: trades.length } };
-  }
+export async function updateTradingDay(userId: string, date: string, trades: Trade[]): Promise<TradeResult<TradingDay>> {
+  const unavailable = assertDatabaseReady(userId);
+  if (unavailable) return { success: false, error: unavailable };
 
   try {
     const performance = calculateDailyPerformance(trades);
-
-    const { data: existingDay } = await supabase!
+    const { data: existing, error: lookupError } = await supabase!
       .from(TABLES.TRADING_DAYS)
-      .select('*')
+      .select('id')
       .eq('user_id', userId)
       .eq('date', date)
-      .single();
+      .maybeSingle();
 
-    if (existingDay) {
-      const { data, error } = await supabase!
-        .from(TABLES.TRADING_DAYS)
-        .update({
-          ...performance,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingDay.id)
-        .eq('user_id', userId)
-        .select()
-        .single();
+    if (lookupError) return { success: false, error: normalizeSupabaseError(lookupError, 'Failed to load trading day') };
+    const values = {
+      user_id: userId,
+      date,
+      total_gross_pnl: performance.totalGrossPnL,
+      total_brokerage: performance.totalBrokerage,
+      total_government_charges: performance.totalGovernmentCharges,
+      total_other_charges: performance.totalOtherCharges,
+      total_net_pnl: performance.totalNetPnL,
+      trade_count: performance.tradeCount,
+      updated_at: new Date().toISOString(),
+    };
 
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
-      return { success: true, data };
-    } else {
-      const { data, error } = await supabase!
-        .from(TABLES.TRADING_DAYS)
-        .insert([
-          {
-            user_id: userId,
-            date,
-            ...performance,
-          },
-        ])
-        .select()
-        .single();
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
-      return { success: true, data };
-    }
-  } catch {
-    return { success: false, error: 'Failed to update trading day' };
+    const query = existing
+      ? supabase!.from(TABLES.TRADING_DAYS).update(values).eq('id', existing.id).eq('user_id', userId)
+      : supabase!.from(TABLES.TRADING_DAYS).insert(values);
+    const { data, error } = await query.select().single();
+    if (error) return { success: false, error: normalizeSupabaseError(error, 'Failed to save trading day') };
+    return { success: true, data: data as TradingDay };
+  } catch (error) {
+    return { success: false, error: normalizeSupabaseError(error, 'Failed to save trading day') };
   }
 }
 
-/**
- * Get trading day data
- */
-export async function getTradingDay(userId: string, date: string): Promise<{ success: boolean; data?: TradingDay; error?: string }> {
-  if (!isSupabaseConfigured) {
-    return { success: true, data: undefined };
-  }
+export async function getTradingDay(userId: string, date: string): Promise<TradeResult<TradingDay | undefined>> {
+  const unavailable = assertDatabaseReady(userId);
+  if (unavailable) return { success: false, error: unavailable };
 
   try {
     const { data, error } = await supabase!
@@ -243,14 +182,11 @@ export async function getTradingDay(userId: string, date: string): Promise<{ suc
       .select('*')
       .eq('user_id', userId)
       .eq('date', date)
-      .single();
+      .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true, data: data || undefined };
-  } catch {
-    return { success: false, error: 'Failed to get trading day' };
+    if (error) return { success: false, error: normalizeSupabaseError(error, 'Failed to load trading day') };
+    return { success: true, data: (data || undefined) as TradingDay | undefined };
+  } catch (error) {
+    return { success: false, error: normalizeSupabaseError(error, 'Failed to load trading day') };
   }
 }

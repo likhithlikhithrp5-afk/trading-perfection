@@ -8,7 +8,7 @@ export type ServiceResult<T> = {
 
 export function ensureSupabaseConfigured(): ServiceResult<null> {
   if (!isSupabaseConfigured || !supabase) {
-    return { success: false, error: 'Supabase is not configured. Demo mode is active.' };
+    return { success: false, error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY before using this feature.' };
   }
 
   return { success: true, data: null };

@@ -1,19 +1,28 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta as { env?: { VITE_SUPABASE_URL?: string; VITE_SUPABASE_ANON_KEY?: string } }).env?.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = (import.meta as { env?: { VITE_SUPABASE_URL?: string; VITE_SUPABASE_ANON_KEY?: string } }).env?.VITE_SUPABASE_ANON_KEY || '';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || '';
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
-
-if (!isSupabaseConfigured) {
-  console.warn('⚠️ VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY not set in environment. Demo mode is active.');
-  console.warn('   URL configured:', !!supabaseUrl);
-  console.warn('   ANON_KEY configured:', !!supabaseAnonKey);
-} else {
-  console.log('✅ Supabase configured successfully. Using production mode.');
+function isValidSupabaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.hostname === 'localhost';
+  } catch {
+    return false;
+  }
 }
 
-export const supabase = isSupabaseConfigured ? createClient(supabaseUrl, supabaseAnonKey) : null;
+export const isSupabaseConfigured = isValidSupabaseUrl(supabaseUrl) && Boolean(supabaseAnonKey);
+
+export const supabase = isSupabaseConfigured
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    })
+  : null;
 
 export const TABLES = {
   USERS: 'users',

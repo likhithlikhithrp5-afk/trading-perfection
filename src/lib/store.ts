@@ -12,7 +12,7 @@ interface AppStore {
 
   // Capital
   capitalSettings: CapitalSettings | null;
-  setCapitalSettings: (capital: CapitalSettings) => void;
+  setCapitalSettings: (capital: CapitalSettings | null) => void;
 
   // Trades
   trades: Trade[];
@@ -33,7 +33,7 @@ interface AppStore {
 export const useAppStore = create<AppStore>((set) => ({
   // Auth
   user: null,
-  isLoading: false,
+  isLoading: true,
   error: null,
   setUser: (user) => set({ user }),
   setIsLoading: (isLoading) => set({ isLoading }),

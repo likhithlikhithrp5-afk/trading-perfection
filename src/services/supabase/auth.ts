@@ -1,11 +1,5 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { ensureProfile } from '@/services/supabase/profiles';
-
-const demoUser = {
-  id: 'demo-user',
-  email: 'demo@tradejournal.com',
-  user_metadata: { full_name: 'Demo Trader' },
-};
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 export interface AuthUser {
   id: string;
@@ -23,220 +17,126 @@ export interface AuthResponse {
   success: boolean;
   error?: string;
   user?: AuthUser;
+  requiresEmailConfirmation?: boolean;
 }
 
-/**
- * Sign up a new user
- */
+function configurationError(): string {
+  return 'Authentication is unavailable because Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.';
+}
+
+function toAuthUser(user: SupabaseUser): AuthUser {
+  return {
+    id: user.id,
+    email: user.email || undefined,
+    user_metadata: {
+      full_name: user.user_metadata?.full_name,
+      avatar_url: user.user_metadata?.avatar_url,
+    },
+  };
+}
+
 export async function signUp(credentials: AuthCredentials): Promise<AuthResponse> {
-  if (!isSupabaseConfigured) {
-    if (credentials.email && credentials.password) {
-      return { success: true, user: { ...demoUser, email: credentials.email, user_metadata: { full_name: credentials.fullName || 'Demo Trader' } } };
-    }
-    return { success: false, error: 'Email and password are required' };
-  }
+  if (!isSupabaseConfigured || !supabase) return { success: false, error: configurationError() };
 
   try {
-    const { data, error } = await supabase!.auth.signUp({
-      email: credentials.email,
+    const { data, error } = await supabase.auth.signUp({
+      email: credentials.email.trim(),
       password: credentials.password,
       options: {
-        data: {
-          full_name: credentials.fullName,
-        },
+        data: { full_name: credentials.fullName?.trim() || '' },
+        emailRedirectTo: `${window.location.origin}/login`,
       },
     });
 
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    if (!data.user) {
-      return { success: false, error: 'Signup completed but no user was returned' };
-    }
-
-    const profileResult = await ensureProfile({
-      id: data.user.id,
-      email: data.user.email || credentials.email,
-      full_name: credentials.fullName || data.user.user_metadata?.full_name || 'Trader',
-      avatar_url: data.user.user_metadata?.avatar_url,
-    });
-
-    if (!profileResult.success) {
-      return { success: false, error: profileResult.error || 'Signup succeeded but profile creation failed' };
-    }
+    if (error) return { success: false, error: error.message };
+    if (!data.user) return { success: false, error: 'Supabase did not return an account. Please try again.' };
 
     return {
       success: true,
-      user: {
-        id: data.user.id,
-        email: data.user.email || credentials.email,
-        user_metadata: {
-          full_name: data.user.user_metadata?.full_name || credentials.fullName,
-          avatar_url: data.user.user_metadata?.avatar_url,
-        },
-      },
+      user: toAuthUser(data.user),
+      requiresEmailConfirmation: !data.session,
     };
-  } catch {
-    return { success: false, error: 'An error occurred during signup' };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to reach Supabase. Check your connection and try again.' };
   }
 }
 
-/**
- * Sign in a user
- */
 export async function signIn(credentials: Pick<AuthCredentials, 'email' | 'password'>): Promise<AuthResponse> {
-  if (!isSupabaseConfigured) {
-    if (credentials.email === 'demo@tradejournal.com' && credentials.password === 'demo123456') {
-      return { success: true, user: demoUser };
-    }
-
-    if (credentials.email && credentials.password) {
-      return { success: true, user: { ...demoUser, email: credentials.email, user_metadata: { full_name: credentials.email.split('@')[0] } } };
-    }
-
-    return { success: false, error: 'Email and password are required' };
-  }
+  if (!isSupabaseConfigured || !supabase) return { success: false, error: configurationError() };
 
   try {
-    const { data, error } = await supabase!.auth.signInWithPassword({
-      email: credentials.email,
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: credentials.email.trim(),
       password: credentials.password,
     });
 
     if (error) {
-      return { success: false, error: error.message };
+      const message = error.message.toLowerCase().includes('email not confirmed')
+        ? 'Please verify your email address before signing in.'
+        : error.message;
+      return { success: false, error: message };
     }
+    if (!data.user) return { success: false, error: 'Supabase did not return a user. Please try again.' };
 
-    if (!data.user) {
-      return { success: false, error: 'Login succeeded but no user was returned' };
-    }
+    return { success: true, user: toAuthUser(data.user) };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to reach Supabase. Check your connection and try again.' };
+  }
+}
 
-    const profileResult = await ensureProfile({
-      id: data.user.id,
-      email: data.user.email || credentials.email,
-      full_name: data.user.user_metadata?.full_name || credentials.email.split('@')[0],
-      avatar_url: data.user.user_metadata?.avatar_url,
+export async function sendPasswordReset(email: string): Promise<AuthResponse> {
+  if (!isSupabaseConfigured || !supabase) return { success: false, error: configurationError() };
+
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
     });
-
-    if (!profileResult.success) {
-      return { success: false, error: profileResult.error || 'Login succeeded but profile sync failed' };
-    }
-
-    return {
-      success: true,
-      user: {
-        id: data.user.id,
-        email: data.user.email || credentials.email,
-        user_metadata: {
-          full_name: data.user.user_metadata?.full_name,
-          avatar_url: data.user.user_metadata?.avatar_url,
-        },
-      },
-    };
-  } catch {
-    return { success: false, error: 'An error occurred during signin' };
+    return error ? { success: false, error: error.message } : { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to send the reset email. Check your connection and try again.' };
   }
 }
 
-/**
- * Sign out the current user
- */
+export async function updatePassword(password: string): Promise<AuthResponse> {
+  if (!isSupabaseConfigured || !supabase) return { success: false, error: configurationError() };
+
+  try {
+    const { data, error } = await supabase.auth.updateUser({ password });
+    if (error) return { success: false, error: error.message };
+    return data.user ? { success: true, user: toAuthUser(data.user) } : { success: false, error: 'Supabase did not return a user.' };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to update your password. Check your connection and try again.' };
+  }
+}
+
 export async function signOut(): Promise<AuthResponse> {
-  if (!isSupabaseConfigured) {
-    return { success: true };
-  }
+  if (!isSupabaseConfigured || !supabase) return { success: false, error: configurationError() };
 
   try {
-    const { error } = await supabase!.auth.signOut();
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true };
-  } catch {
-    return { success: false, error: 'An error occurred during signout' };
+    const { error } = await supabase.auth.signOut();
+    return error ? { success: false, error: error.message } : { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to sign out. Please try again.' };
   }
 }
 
-/**
- * Get the current session
- */
 export async function getCurrentSession() {
-  if (!isSupabaseConfigured) {
-    return { session: null, error: null };
-  }
+  if (!isSupabaseConfigured || !supabase) return { session: null, error: configurationError() };
 
   try {
-    const { data, error } = await supabase!.auth.getSession();
-
-    if (error) {
-      return { session: null, error: error.message };
-    }
-
-    return { session: data.session, error: null };
-  } catch {
-    return { session: null, error: 'Failed to get session' };
+    const { data, error } = await supabase.auth.getSession();
+    return error ? { session: null, error: error.message } : { session: data.session, error: null };
+  } catch (error) {
+    return { session: null, error: error instanceof Error ? error.message : 'Unable to restore the Supabase session.' };
   }
 }
 
-/**
- * Get the current user
- */
-export async function getCurrentUser() {
-  if (!isSupabaseConfigured) {
-    return { user: demoUser, error: null };
-  }
+export function onAuthStateChange(callback: (user: AuthUser | null) => void): () => void {
+  if (!isSupabaseConfigured || !supabase) return () => undefined;
 
-  try {
-    const { data, error } = await supabase!.auth.getUser();
-
-    if (error) {
-      return { user: null, error: error.message };
-    }
-
-    return {
-      user: data.user
-        ? {
-            id: data.user.id,
-            email: data.user.email || undefined,
-            user_metadata: {
-              full_name: data.user.user_metadata?.full_name,
-              avatar_url: data.user.user_metadata?.avatar_url,
-            },
-          }
-        : null,
-      error: null,
-    };
-  } catch {
-    return { user: null, error: 'Failed to get user' };
-  }
-}
-
-/**
- * Listen to auth changes
- */
-export function onAuthStateChange(callback: (user: AuthUser | null) => void) {
-  if (!isSupabaseConfigured) {
-    callback(demoUser);
-    return () => undefined;
-  }
-
-  const { data: authListener } = supabase!.auth.onAuthStateChange(async (_event, session) => {
-    callback(
-      session?.user
-        ? {
-            id: session.user.id,
-            email: session.user.email || undefined,
-            user_metadata: {
-              full_name: session.user.user_metadata?.full_name,
-              avatar_url: session.user.user_metadata?.avatar_url,
-            },
-          }
-        : null
-    );
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    callback(session?.user ? toAuthUser(session.user) : null);
   });
 
-  return authListener?.subscription.unsubscribe;
+  return () => subscription.unsubscribe();
 }

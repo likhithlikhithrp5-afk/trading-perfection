@@ -6,6 +6,7 @@ import { Menu, X, LogOut } from 'lucide-react';
 
 export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const { user, setUser } = useAppStore();
   const location = useLocation();
   const navigate = useNavigate();
@@ -14,7 +15,9 @@ export default function Header() {
     const response = await signOut();
     if (response.success) {
       setUser(null);
-      navigate('/');
+      navigate('/login', { replace: true });
+    } else {
+      setLogoutError(response.error || 'Unable to sign out. Please try again.');
     }
   };
 
@@ -32,7 +35,8 @@ export default function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-50 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
+    <header className="sticky top-0 z-50 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+      {logoutError && <p role="alert" className="bg-loss/10 px-4 py-2 text-center text-sm text-loss">{logoutError}</p>}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
@@ -69,6 +73,7 @@ export default function Header() {
               </span>
               <button
                 onClick={handleLogout}
+                aria-label="Log out"
                 className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 text-loss rounded-lg transition-colors"
               >
                 <LogOut size={20} />
@@ -78,6 +83,7 @@ export default function Header() {
             {/* Mobile Menu Button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
               className="md:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}

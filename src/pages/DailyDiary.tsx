@@ -1,30 +1,23 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { BookOpen, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Plus, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Plus, X, Pencil, Trash2 } from 'lucide-react';
 import { addDays, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay, parseISO, startOfMonth, startOfWeek } from 'date-fns';
 import { useAppStore } from '@/lib/store';
 import { formatCurrency } from '@/utils/format';
-import { Trade } from '@/types';
+import type { Trade } from '@/types';
 import TradeForm from '@/components/trades/TradeForm';
-import { createTrade } from '@/services/supabase/trades';
+import { createTrade, deleteTrade, updateTrade } from '@/services/supabase/trades';
 import { uploadTradeImage } from '@/services/supabase/screenshots';
-
-const demoTrades: Trade[] = [
-  { id: '1', user_id: 'u1', trade_date: '2026-09-02', symbol: 'NIFTY', quantity: 50, entry_price: 23970, exit_price: 24080, order_type: 'BUY', brokerage: 20, government_charges: 12, other_charges: 8, gross_pnl: 5500, net_pnl: 5460, instrument: 'INDEX', exchange: 'NSE', strategy_id: 's1', notes: 'Breakout trade' },
-  { id: '2', user_id: 'u1', trade_date: '2026-09-03', symbol: 'BANKNIFTY', quantity: 25, entry_price: 51400, exit_price: 51120, order_type: 'SELL', brokerage: 22, government_charges: 14, other_charges: 6, gross_pnl: 7000, net_pnl: 6958, instrument: 'INDEX', exchange: 'NSE', strategy_id: 's2', notes: 'Fade into resistance' },
-  { id: '3', user_id: 'u1', trade_date: '2026-09-04', symbol: 'RELIANCE', quantity: 100, entry_price: 2865, exit_price: 2840, order_type: 'SELL', brokerage: 15, government_charges: 9, other_charges: 5, gross_pnl: 2500, net_pnl: 2471, instrument: 'STOCK', exchange: 'NSE', strategy_id: 's3', notes: 'Mean reversion' },
-  { id: '4', user_id: 'u1', trade_date: '2026-09-05', symbol: 'TCS', quantity: 80, entry_price: 3360, exit_price: 3405, order_type: 'BUY', brokerage: 18, government_charges: 11, other_charges: 5, gross_pnl: 3600, net_pnl: 3566, instrument: 'STOCK', exchange: 'NSE', strategy_id: 's1', notes: 'Trend continuation' },
-  { id: '5', user_id: 'u1', trade_date: '2026-09-07', symbol: 'INFY', quantity: 150, entry_price: 1490, exit_price: 1475, order_type: 'SELL', brokerage: 17, government_charges: 10, other_charges: 4, gross_pnl: 2250, net_pnl: 2219, instrument: 'STOCK', exchange: 'NSE', strategy_id: 's2', notes: 'Short scalp' },
-  { id: '6', user_id: 'u1', trade_date: '2026-09-10', symbol: 'NIFTY', quantity: 60, entry_price: 24080, exit_price: 24145, order_type: 'BUY', brokerage: 20, government_charges: 12, other_charges: 7, gross_pnl: 3900, net_pnl: 3861, instrument: 'INDEX', exchange: 'NSE', strategy_id: 's1', notes: 'Breakout retest' },
-];
 
 export default function DailyDiary() {
   const params = useParams();
   const navigate = useNavigate();
-  const { trades, user, addTrade } = useAppStore();
+  const { trades, user, addTrade, updateTrade: updateStoredTrade, deleteTrade: deleteStoredTrade } = useAppStore();
   const [showTradeForm, setShowTradeForm] = useState(false);
   const [isSubmittingTrade, setIsSubmittingTrade] = useState(false);
-  const effectiveTrades = trades.length > 0 ? trades : demoTrades;
+  const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
+  const [formError, setFormError] = useState('');
+  const effectiveTrades = trades;
 
   const selectedDate = useMemo(() => {
     const year = Number(params.year || new Date().getFullYear());
@@ -67,42 +60,63 @@ export default function DailyDiary() {
   const monthLabel = format(selectedDate, 'MMMM yyyy');
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
 
-  const handleAddTrade = async (
+  const handleSaveTrade = async (
     tradeData: Omit<Trade, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'gross_pnl' | 'net_pnl'>,
     image?: File
   ) => {
     if (!user?.id) {
-      console.error('❌ User not authenticated');
-      alert('You must be logged in to create a trade');
+      setFormError('Your session has expired. Sign in again before saving this trade.');
       return;
     }
 
-    console.log('🔄 Submitting trade for user:', user.id);
+    setFormError('');
     setIsSubmittingTrade(true);
     try {
-      const result = await createTrade(user.id, tradeData);
-      console.log('📊 Trade creation result:', result);
+      const result = editingTrade
+        ? await updateTrade(user.id, editingTrade.id, tradeData)
+        : await createTrade(user.id, tradeData);
 
       if (result.success && result.data) {
-        console.log('✅ Trade created successfully, updating store');
-        addTrade(result.data);
+        if (editingTrade) updateStoredTrade(result.data.id, result.data);
+        else addTrade(result.data);
         if (image) {
           const upload = await uploadTradeImage(user.id, tradeData.trade_date, image);
           if (!upload.success) {
-            alert(`Trade saved, but the photo could not be uploaded: ${upload.error || 'Unknown error'}`);
+            setFormError(`Trade saved, but the photo could not be uploaded: ${upload.error || 'Unknown error'}`);
           }
         }
         setShowTradeForm(false);
+        setEditingTrade(null);
       } else {
-        console.error('❌ Trade creation failed:', result.error);
-        alert(`Failed to create trade: ${result.error || 'Unknown error'}`);
+        setFormError(result.error || 'Failed to save trade.');
       }
     } catch (error) {
-      console.error('❌ Error creating trade:', error);
-      alert(`Error: ${error instanceof Error ? error.message : 'Failed to create trade'}`);
+      setFormError(error instanceof Error ? error.message : 'Failed to save trade.');
     } finally {
       setIsSubmittingTrade(false);
     }
+  };
+
+  const handleDeleteTrade = async (trade: Trade) => {
+    if (!user?.id) {
+      setFormError('Your session has expired. Sign in again before deleting a trade.');
+      return;
+    }
+    if (!window.confirm(`Delete the ${trade.symbol} trade from ${trade.trade_date}? This cannot be undone.`)) return;
+
+    setFormError('');
+    const result = await deleteTrade(user.id, trade.id);
+    if (!result.success) {
+      setFormError(result.error || 'Failed to delete trade.');
+      return;
+    }
+    deleteStoredTrade(trade.id);
+  };
+
+  const openNewTradeForm = () => {
+    setFormError('');
+    setEditingTrade(null);
+    setShowTradeForm(true);
   };
 
   return (
@@ -112,12 +126,20 @@ export default function DailyDiary() {
           <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-500">Trader's diary</p>
           <h1 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">Daily journal</h1>
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <button onClick={() => handleMonthShift(-1)} className="rounded-full p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><ChevronLeft size={16} /></button>
-          <div className="min-w-[140px] text-center font-medium">{monthLabel}</div>
-          <button onClick={() => handleMonthShift(1)} className="rounded-full p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><ChevronRight size={16} /></button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+            <button type="button" aria-label="Previous month" onClick={() => handleMonthShift(-1)} className="rounded-full p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><ChevronLeft size={16} /></button>
+            <div className="min-w-[140px] text-center font-medium">{monthLabel}</div>
+            <button type="button" aria-label="Next month" onClick={() => handleMonthShift(1)} className="rounded-full p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><ChevronRight size={16} /></button>
+          </div>
+          <button type="button" onClick={openNewTradeForm} className="flex items-center gap-2 rounded-lg bg-profit px-4 py-2 font-medium text-white transition-colors hover:bg-profit/90">
+            <Plus size={18} />
+            Add Trade
+          </button>
         </div>
       </div>
+
+      {formError && <p role="alert" className="mb-4 rounded-lg border border-loss/30 bg-loss/10 p-3 text-sm text-loss">{formError}</p>}
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -139,7 +161,6 @@ export default function DailyDiary() {
                   key={key}
                   onClick={() => {
                     navigate(`/diary/${day.getFullYear()}/${day.getMonth() + 1}/${day.getDate()}`);
-                    setShowTradeForm(true);
                   }}
                   className={`min-h-[86px] rounded-xl border p-2 text-left transition ${
                     isSelected
@@ -168,8 +189,8 @@ export default function DailyDiary() {
                 <h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-white">{dayLabel}</h2>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => handleDayShift(-1)} className="rounded-full border border-slate-200 p-2 dark:border-slate-700"><ChevronLeft size={16} /></button>
-                <button onClick={() => handleDayShift(1)} className="rounded-full border border-slate-200 p-2 dark:border-slate-700"><ChevronRight size={16} /></button>
+                <button type="button" aria-label="Previous day" onClick={() => handleDayShift(-1)} className="rounded-full border border-slate-200 p-2 dark:border-slate-700"><ChevronLeft size={16} /></button>
+                <button type="button" aria-label="Next day" onClick={() => handleDayShift(1)} className="rounded-full border border-slate-200 p-2 dark:border-slate-700"><ChevronRight size={16} /></button>
               </div>
             </div>
 
@@ -189,28 +210,29 @@ export default function DailyDiary() {
             <textarea
               className="mt-4 min-h-[110px] w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 outline-none ring-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
               placeholder="Write the market context, setup quality, execution notes, and lessons from today..."
-              value={dayTrades.length ? 'Market structure stayed clean across the session. Trades were taken with clear invalidation and good risk-reward control.' : 'No notes recorded yet. Add context for this session.'}
+              defaultValue=""
             />
+            {dayTrades.length === 0 && <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">No trades recorded for this day yet.</p>}
           </div>
         </div>
       </div>
 
-      {dayTrades.length > 0 && (
-        <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Trades for {dayLabel}</h2>
-            <div className="flex items-center gap-3">
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{dayTrades.length} trades</span>
-              <button
-                onClick={() => setShowTradeForm(true)}
-                className="flex items-center gap-2 rounded-lg bg-profit hover:bg-profit/90 px-3 py-1.5 text-sm font-medium text-white transition-colors"
-              >
-                <Plus size={16} />
-                Add Trade
-              </button>
-            </div>
-          </div>
+      <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Trades for {dayLabel}</h2>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{dayTrades.length} trades</span>
+        </div>
 
+        {dayTrades.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center dark:border-slate-700">
+            <p className="font-medium text-slate-700 dark:text-slate-200">No trades recorded for this day</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Add a trade to see its P&amp;L in your calendar and dashboard.</p>
+            <button type="button" onClick={openNewTradeForm} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-profit px-4 py-2 text-sm font-medium text-white hover:bg-profit/90">
+              <Plus size={16} />
+              Add Trade
+            </button>
+          </div>
+        ) : (
           <div className="space-y-3">
             {dayTrades.map((trade: Trade) => (
               <div key={trade.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60 md:flex-row md:items-center md:justify-between">
@@ -219,34 +241,28 @@ export default function DailyDiary() {
                     <span className="text-lg font-semibold text-slate-900 dark:text-white">{trade.symbol}</span>
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${trade.order_type === 'BUY' ? 'bg-profit/10 text-profit' : 'bg-loss/10 text-loss'}`}>{trade.order_type}</span>
                   </div>
-                  {trade.result ? (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                      Result: {trade.result} • R:R {trade.risk_reward}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Qty {trade.quantity} • Entry {trade.entry_price} • Exit {trade.exit_price}</p>
-                  )}
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Qty {trade.quantity} · Entry {trade.entry_price} · Exit {trade.exit_price}</p>
+                  {(trade.strategy || trade.risk_reward) && <p className="text-xs text-slate-500 dark:text-slate-400">{[trade.strategy, trade.risk_reward && `R:R ${trade.risk_reward}`].filter(Boolean).join(' · ')}</p>}
+                  {trade.notes && <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{trade.notes}</p>}
                 </div>
-                <div className="flex items-center gap-3">
-                  {trade.result ? (
-                    <span className={`rounded-full px-3 py-1 text-sm font-semibold capitalize ${trade.result === 'positive' ? 'bg-profit/10 text-profit' : 'bg-loss/10 text-loss'}`}>
-                      {trade.result}
-                    </span>
-                  ) : (
-                    <>
-                      <div className="text-right">
-                        <p className={`text-lg font-bold ${Number(trade.net_pnl) >= 0 ? 'text-profit' : 'text-loss'}`}>{formatCurrency(Number(trade.net_pnl))}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">Gross {formatCurrency(Number(trade.gross_pnl))}</p>
-                      </div>
-                      {Number(trade.net_pnl) >= 0 ? <TrendingUp size={18} className="text-profit" /> : <TrendingDown size={18} className="text-loss" />}
-                    </>
-                  )}
+                <div className="flex items-center justify-between gap-3 md:justify-end">
+                  <div className="text-right">
+                    <p className={`text-lg font-bold ${Number(trade.net_pnl) >= 0 ? 'text-profit' : 'text-loss'}`}>{formatCurrency(Number(trade.net_pnl))}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Gross {formatCurrency(Number(trade.gross_pnl))}</p>
+                  </div>
+                  {Number(trade.net_pnl) >= 0 ? <TrendingUp size={18} className="text-profit" /> : <TrendingDown size={18} className="text-loss" />}
+                  <button type="button" aria-label={`Edit ${trade.symbol} trade`} onClick={() => {
+                    setFormError('');
+                    setEditingTrade(trade);
+                    setShowTradeForm(true);
+                  }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-200 hover:text-profit dark:hover:bg-slate-700"><Pencil size={17} /></button>
+                  <button type="button" aria-label={`Delete ${trade.symbol} trade`} onClick={() => void handleDeleteTrade(trade)} className="rounded-lg p-2 text-slate-500 hover:bg-loss/10 hover:text-loss"><Trash2 size={17} /></button>
                 </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {showTradeForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -258,20 +274,24 @@ export default function DailyDiary() {
           >
             <button
               type="button"
-              onClick={() => setShowTradeForm(false)}
-              aria-label="Close add trade form"
+              onClick={() => {
+                setShowTradeForm(false);
+                setEditingTrade(null);
+              }}
+              aria-label="Close trade form"
               className="absolute right-4 top-4 rounded-full p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <X size={22} />
             </button>
             <h2 id="add-trade-title" className="mb-4 pr-10 text-2xl font-bold sm:text-3xl">
-              Add trade — {dayLabel}
+              {editingTrade ? 'Edit trade' : 'Add trade'} — {dayLabel}
             </h2>
             <TradeForm
-              key={selectedDateStr}
-              onSubmit={handleAddTrade}
+              key={`${editingTrade?.id || 'new'}-${selectedDateStr}`}
+              onSubmit={handleSaveTrade}
               isLoading={isSubmittingTrade}
               trade_date={selectedDateStr}
+              initialData={editingTrade || undefined}
             />
           </div>
         </div>

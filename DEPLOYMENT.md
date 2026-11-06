@@ -1,23 +1,35 @@
 # Trade Journal AI - Deployment Guide
 
+## Supabase setup
+
+1. In the Supabase SQL Editor, run `supabase/migrations/001_init.sql`, then
+   `supabase/migrations/002_add_trade_result_and_risk_reward.sql`, then
+   `supabase/migrations/003_auth_and_trade_workflow.sql`, in that order. The
+   final migration adds the strategy text field, ensures RLS on trades, creates
+   user-only trade policies, and creates/backfills profiles at signup.
+2. In **Authentication → URL Configuration**, set the Site URL to your
+   production app URL. Add these Redirect URLs:
+   - `http://localhost:5173/**` for local development.
+   - `https://<your-production-domain>/**` for the Vercel domain and any
+     production custom domain.
+3. In **Authentication → Providers → Email**, enable email/password sign-in
+   and decide whether email confirmation is required. With confirmation
+   enabled, users must confirm their email before signing in.
+
+The browser uses only the Supabase project URL and publishable/anon key. Never
+put a service-role key in a `VITE_` variable or in this application.
+
 ## Local Development
 
 To run the application locally:
 
 ```bash
-cd /path/to/trade-journal-ai
-
-# Install dependencies (if not already done)
-npm install
-
-# Create .env.local with Supabase credentials
-cp .env.example .env.local
-
-# Start development server
+npm ci
+# Copy .env.example to .env.local and set the real Supabase project URL/key.
 npm run dev
 ```
 
-The app will be available at `http://localhost:3000`
+Vite prints the local URL (normally `http://localhost:5173`).
 
 ## Production Build
 
@@ -35,17 +47,16 @@ This creates an optimized build in the `dist/` folder.
 
 ### Option 1: Vercel (Recommended)
 
-```bash
-# Install Vercel CLI
-npm install -g vercel
-
-# Deploy
-vercel
-```
-
-During deployment, add your environment variables in Vercel settings:
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+1. Import the existing GitHub repository into Vercel; do not create a replacement
+   project.
+2. Keep the detected Vite settings: build command `npm run build`, output
+   directory `dist`, and install command `npm ci`.
+3. In the Vercel project's **Settings → Environment Variables**, add
+   `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for Production and Preview
+   environments that should connect to Supabase.
+4. Deploy. `vercel.json` rewrites direct SPA routes (including password reset)
+   to `index.html`.
+5. Add the deployed URL to the Supabase Auth Redirect URLs as described above.
 
 ### Option 2: Netlify
 
@@ -95,7 +106,7 @@ docker run -p 80:80 trade-journal-ai
 
 Required for production:
 - `VITE_SUPABASE_URL` - Your Supabase project URL
-- `VITE_SUPABASE_ANON_KEY` - Your Supabase anon key
+- `VITE_SUPABASE_ANON_KEY` - Your Supabase publishable/anon key (never the service-role key)
 
 Optional:
 - `VITE_AI_PROVIDER` - AI provider (default: 'fallback')

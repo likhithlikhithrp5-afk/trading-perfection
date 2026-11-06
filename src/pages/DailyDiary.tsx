@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { BookOpen, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Plus, X, Pencil, Trash2 } from 'lucide-react';
 import { addDays, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay, parseISO, startOfMonth, startOfWeek } from 'date-fns';
@@ -6,6 +6,7 @@ import { useAppStore } from '@/lib/store';
 import { formatCurrency } from '@/utils/format';
 import type { Trade } from '@/types';
 import TradeForm from '@/components/trades/TradeForm';
+import { createOrUpdateDailyDiary, getDailyDiary } from '@/services/supabase/diary';
 import { createTrade, deleteTrade, updateTrade } from '@/services/supabase/trades';
 import { uploadTradeImage } from '@/services/supabase/screenshots';
 
@@ -17,6 +18,11 @@ export default function DailyDiary() {
   const [isSubmittingTrade, setIsSubmittingTrade] = useState(false);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [formError, setFormError] = useState('');
+  const [dailyNotes, setDailyNotes] = useState('');
+  const [notesLoadedFor, setNotesLoadedFor] = useState('');
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [notesError, setNotesError] = useState('');
+  const [notesSaved, setNotesSaved] = useState(false);
   const effectiveTrades = trades;
 
   const selectedDate = useMemo(() => {
@@ -59,6 +65,58 @@ export default function DailyDiary() {
   const dayLabel = format(selectedDate, 'EEEE, d MMMM yyyy');
   const monthLabel = format(selectedDate, 'MMMM yyyy');
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
+  const notesKey = `${user?.id || ''}:${selectedDateStr}`;
+  const isLoadingNotes = Boolean(user?.id) && notesLoadedFor !== notesKey;
+
+  useEffect(() => {
+    let active = true;
+
+    if (!user?.id) return;
+    void getDailyDiary(user.id, selectedDateStr).then((result) => {
+      if (!active) return;
+      setNotesError('');
+      setNotesSaved(false);
+      if (result.success) {
+        setDailyNotes(result.data?.notes || '');
+      } else {
+        setDailyNotes('');
+        setNotesError(result.error || 'Failed to load daily notes.');
+      }
+      setNotesLoadedFor(notesKey);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setDailyNotes('');
+      setNotesError(error instanceof Error ? error.message : 'Failed to load daily notes.');
+      setNotesLoadedFor(notesKey);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [notesKey, selectedDateStr, user?.id]);
+
+  const handleSaveNotes = async () => {
+    if (!user?.id) {
+      setNotesError('Your session has expired. Sign in again before saving daily notes.');
+      return;
+    }
+
+    setNotesError('');
+    setNotesSaved(false);
+    setIsSavingNotes(true);
+    try {
+      const result = await createOrUpdateDailyDiary(user.id, selectedDateStr, dailyNotes);
+      if (!result.success) {
+        setNotesError(result.error || 'Failed to save daily notes.');
+        return;
+      }
+      setNotesSaved(true);
+    } catch (error) {
+      setNotesError(error instanceof Error ? error.message : 'Failed to save daily notes.');
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
 
   const handleSaveTrade = async (
     tradeData: Omit<Trade, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'gross_pnl' | 'net_pnl'>,
@@ -153,23 +211,30 @@ export default function DailyDiary() {
             {days.map((day) => {
               const key = format(day, 'yyyy-MM-dd');
               const pnl = monthMap.get(key) || 0;
-              const isCurrentMonth = day.getMonth() === selectedDate.getMonth();
+              const isCurrentMonth = day.getMonth() === selectedDate.getMonth() && day.getFullYear() === selectedDate.getFullYear();
               const isSelected = isSameDay(day, selectedDate);
+              const isToday = isSameDay(day, new Date());
 
               return (
                 <button
                   key={key}
+                  type="button"
+                  aria-label={`${format(day, 'EEEE, d MMMM yyyy')}${isToday ? ', today' : ''}${isSelected ? ', selected' : ''}`}
+                  aria-current={isToday ? 'date' : undefined}
+                  aria-pressed={isSelected}
                   onClick={() => {
                     navigate(`/diary/${day.getFullYear()}/${day.getMonth() + 1}/${day.getDate()}`);
                   }}
                   className={`min-h-[86px] rounded-xl border p-2 text-left transition ${
                     isSelected
-                      ? 'border-profit bg-profit/10 dark:border-profit dark:bg-profit/10'
-                      : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700'
+                      ? 'border-profit bg-profit/10 ring-2 ring-profit/30 dark:border-profit dark:bg-profit/10'
+                      : isToday
+                        ? 'border-sky-500 bg-sky-50 hover:bg-sky-100 dark:border-sky-400 dark:bg-sky-950/30 dark:hover:bg-sky-900/40'
+                        : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700'
                   } ${!isCurrentMonth ? 'opacity-50' : ''}`}
                 >
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{format(day, 'd')}</span>
+                    <span className={`text-sm font-medium ${isToday && !isSelected ? 'text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200'}`}>{format(day, 'd')}</span>
                     {pnl !== 0 && <span className={`text-[10px] font-semibold ${pnl >= 0 ? 'text-profit' : 'text-loss'}`}>{formatCurrency(pnl)}</span>}
                   </div>
                   <div className={`rounded-md px-1.5 py-1 text-[10px] ${pnl > 0 ? 'bg-profit/10 text-profit' : pnl < 0 ? 'bg-loss/10 text-loss' : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'}`}>
@@ -209,9 +274,27 @@ export default function DailyDiary() {
             </div>
             <textarea
               className="mt-4 min-h-[110px] w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 outline-none ring-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-              placeholder="Write the market context, setup quality, execution notes, and lessons from today..."
-              defaultValue=""
+              placeholder={`Write the market context, setup quality, execution notes, and lessons from ${format(selectedDate, 'd MMMM')}...`}
+              value={isLoadingNotes ? '' : dailyNotes}
+              onChange={(event) => {
+                setDailyNotes(event.target.value);
+                setNotesSaved(false);
+              }}
+              disabled={isLoadingNotes || isSavingNotes}
             />
+            {isLoadingNotes && <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Loading daily notes...</p>}
+            {notesError && <p role="alert" className="mt-2 text-sm text-loss">{notesError}</p>}
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span role="status" className="text-sm text-profit">{notesSaved ? 'Notes saved.' : ''}</span>
+              <button
+                type="button"
+                onClick={() => void handleSaveNotes()}
+                disabled={isLoadingNotes || isSavingNotes}
+                className="rounded-lg bg-profit px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-profit/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSavingNotes ? 'Saving...' : 'Save notes'}
+              </button>
+            </div>
             {dayTrades.length === 0 && <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">No trades recorded for this day yet.</p>}
           </div>
         </div>

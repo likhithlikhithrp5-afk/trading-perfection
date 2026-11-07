@@ -46,10 +46,12 @@ export default function DailyDiary() {
   const totalDayPnl = dayTrades.reduce((sum: number, trade: Trade) => sum + Number(trade.net_pnl || 0), 0);
 
   const monthMap = new Map<string, number>();
+  const monthTradeCounts = new Map<string, number>();
   effectiveTrades.forEach((trade: Trade) => {
     const d = parseISO(trade.trade_date);
     const key = format(d, 'yyyy-MM-dd');
     monthMap.set(key, (monthMap.get(key) || 0) + Number(trade.net_pnl || 0));
+    monthTradeCounts.set(key, (monthTradeCounts.get(key) || 0) + 1);
   });
 
   const handleMonthShift = (direction: number) => {
@@ -211,6 +213,7 @@ export default function DailyDiary() {
             {days.map((day) => {
               const key = format(day, 'yyyy-MM-dd');
               const pnl = monthMap.get(key) || 0;
+              const tradeCount = monthTradeCounts.get(key) || 0;
               const isCurrentMonth = day.getMonth() === selectedDate.getMonth() && day.getFullYear() === selectedDate.getFullYear();
               const isSelected = isSameDay(day, selectedDate);
               const isToday = isSameDay(day, new Date());
@@ -219,11 +222,12 @@ export default function DailyDiary() {
                 <button
                   key={key}
                   type="button"
-                  aria-label={`${format(day, 'EEEE, d MMMM yyyy')}${isToday ? ', today' : ''}${isSelected ? ', selected' : ''}`}
+                  aria-label={`${format(day, 'EEEE, d MMMM yyyy')}${tradeCount ? `, ${tradeCount} ${tradeCount === 1 ? 'trade' : 'trades'}` : ', no trades'}${isToday ? ', today' : ''}${isSelected ? ', selected' : ''}`}
                   aria-current={isToday ? 'date' : undefined}
                   aria-pressed={isSelected}
                   onClick={() => {
                     navigate(`/diary/${day.getFullYear()}/${day.getMonth() + 1}/${day.getDate()}`);
+                    openNewTradeForm();
                   }}
                   className={`min-h-[86px] rounded-xl border p-2 text-left transition ${
                     isSelected
@@ -235,10 +239,10 @@ export default function DailyDiary() {
                 >
                   <div className="mb-2 flex items-center justify-between">
                     <span className={`text-sm font-medium ${isToday && !isSelected ? 'text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200'}`}>{format(day, 'd')}</span>
-                    {pnl !== 0 && <span className={`text-[10px] font-semibold ${pnl >= 0 ? 'text-profit' : 'text-loss'}`}>{formatCurrency(pnl)}</span>}
+                    {tradeCount > 0 && <span className={`text-[10px] font-semibold ${pnl > 0 ? 'text-profit' : pnl < 0 ? 'text-loss' : 'text-slate-500 dark:text-slate-400'}`}>{formatCurrency(pnl)}</span>}
                   </div>
-                  <div className={`rounded-md px-1.5 py-1 text-[10px] ${pnl > 0 ? 'bg-profit/10 text-profit' : pnl < 0 ? 'bg-loss/10 text-loss' : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'}`}>
-                    {pnl === 0 ? 'No trades' : pnl > 0 ? 'Profit' : 'Loss'}
+                  <div className={`rounded-md px-1.5 py-1 text-[10px] ${tradeCount > 0 && pnl > 0 ? 'bg-profit/10 text-profit' : tradeCount > 0 && pnl < 0 ? 'bg-loss/10 text-loss' : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'}`}>
+                    {tradeCount === 0 ? 'No trades' : `${tradeCount} ${tradeCount === 1 ? 'trade' : 'trades'}`}
                   </div>
                 </button>
               );
@@ -310,10 +314,6 @@ export default function DailyDiary() {
           <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center dark:border-slate-700">
             <p className="font-medium text-slate-700 dark:text-slate-200">No trades recorded for this day</p>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Add a trade to see its P&amp;L in your calendar and dashboard.</p>
-            <button type="button" onClick={openNewTradeForm} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-profit px-4 py-2 text-sm font-medium text-white hover:bg-profit/90">
-              <Plus size={16} />
-              Add Trade
-            </button>
           </div>
         ) : (
           <div className="space-y-3">

@@ -22,7 +22,7 @@ function calculateTradePnl(trade: TradeInput | Trade): Pick<Trade, 'gross_pnl' |
   return {
     gross_pnl,
     net_pnl,
-    result: net_pnl > 0 ? 'positive' : net_pnl < 0 ? 'negative' : null,
+    result: trade.result ?? (net_pnl > 0 ? 'positive' : net_pnl < 0 ? 'negative' : null),
   };
 }
 
